@@ -1,0 +1,32 @@
+name: Build Windows EXE
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Configure MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Compile AimSmoothLab
+        shell: cmd
+        run: cl /nologo /EHsc /std:c++17 /O2 /DUNICODE /D_UNICODE main.cpp /Fe:AimSmoothLab.exe /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib comctl32.lib
+
+      - name: Package executable
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist
+          Copy-Item AimSmoothLab.exe dist/
+
+      - name: Upload EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: AimSmoothLab-Windows11
+          path: dist/AimSmoothLab.exe
