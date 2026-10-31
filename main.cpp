@@ -15,17 +15,15 @@
 struct Config { int key=VK_XBUTTON1; int smooth=35; bool toggle=false; } cfg;
 HWND windowHandle=nullptr, keyButton=nullptr, slider=nullptr, toggleBox=nullptr, colorBox=nullptr;
 int targetColor=0;
-HWND analyzeButton=nullptr;
+HWND analyzeButton=nullptr,liveButton=nullptr,liveTarget=nullptr;
+bool liveMode=false;int armCountdown=0;
 std::wstring analysis=L"No screenshot loaded. BMP screenshots only.";
 int detectedPixels=0, boxLeft=0,boxTop=0,boxRight=0,boxBottom=0;
 struct Region {int left,top,right,bottom,count;};
 std::vector<Region> regions;
 HBITMAP previewBitmap=nullptr;int previewWidth=0,previewHeight=0;
-void analyzeBmp(HWND h){
- wchar_t filename[MAX_PATH]=L"";OPENFILENAMEW of{};of.lStructSize=sizeof(of);of.hwndOwner=h;of.lpstrFile=filename;of.nMaxFile=MAX_PATH;of.lpstrFilter=L"Bitmap screenshots (*.bmp)\0*.bmp\0\0";of.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST;
- if(!GetOpenFileNameW(&of))return;
- HBITMAP bmp=(HBITMAP)LoadImageW(nullptr,filename,IMAGE_BITMAP,0,0,LR_LOADFROMFILE|LR_CREATEDIBSECTION);
- if(!bmp){analysis=L"Could not open BMP.";InvalidateRect(h,nullptr,TRUE);return;}
+void analyzeBitmap(HWND h,HBITMAP bmp,bool live){
+ if(!bmp){analysis=L"Capture failed or unavailable.";InvalidateRect(h,nullptr,TRUE);return;}
  if(previewBitmap)DeleteObject(previewBitmap);previewBitmap=bmp;
  BITMAP info{};GetObjectW(bmp,sizeof(info),&info);previewWidth=info.bmWidth;previewHeight=info.bmHeight;
  std::vector<int> colCount(info.bmWidth,0),colTop(info.bmWidth,info.bmHeight),colBottom(info.bmWidth,0);regions.clear();HDC dc=CreateCompatibleDC(nullptr);HGDIOBJ previous=SelectObject(dc,bmp);
@@ -77,9 +75,28 @@ void analyzeBmp(HWND h){
   }
  }
  regions.swap(refined);
- if(detectedPixels)analysis=L"Purple pixels: "+std::to_wstring(detectedPixels)+L" | Separate regions: "+std::to_wstring(regions.size())+L" (offline preview below)";
+ if(detectedPixels)analysis=L"Purple pixels: "+std::to_wstring(detectedPixels)+L" | Separate regions: "+std::to_wstring(regions.size())+(live?L" (LIVE preview)":L" (offline preview)");
  else analysis=L"No purple pixels found in BMP.";
  InvalidateRect(h,nullptr,TRUE);
+}
+
+void analyzeBmp(HWND h){
+ wchar_t filename[MAX_PATH]=L"";OPENFILENAMEW of{};of.lStructSize=sizeof(of);of.hwndOwner=h;of.lpstrFile=filename;of.nMaxFile=MAX_PATH;of.lpstrFilter=L"Bitmap screenshots (*.bmp)\\0*.bmp\\0\\0";of.Flags=OFN_FILEMUSTEXIST|OFN_PATHMUSTEXIST;
+ if(!GetOpenFileNameW(&of))return;
+ HBITMAP bmp=(HBITMAP)LoadImageW(nullptr,filename,IMAGE_BITMAP,0,0,LR_LOADFROMFILE|LR_CREATEDIBSECTION);
+ analyzeBitmap(h,bmp,false);
+}
+void captureLive(HWND h){
+ if(!liveTarget || !IsWindow(liveTarget) || IsIconic(liveTarget)){liveMode=false;analysis=L"Window unavailable or minimized.";return;}
+ RECT r{};GetClientRect(liveTarget,&r);int w=r.right,hgt=r.bottom;
+ if(w<20 || hgt<20 || w>6000 || hgt>4000){analysis=L"Invalid capture dimensions.";return;}
+ HDC src=GetDC(liveTarget);if(!src){analysis=L"Cannot access target window.";return;}
+ HDC mem=CreateCompatibleDC(src);HBITMAP bmp=CreateCompatibleBitmap(src,w,hgt);
+ if(!mem||!bmp){if(bmp)DeleteObject(bmp);if(mem)DeleteDC(mem);ReleaseDC(liveTarget,src);analysis=L"Capture allocation failed.";return;}
+ HGDIOBJ old=SelectObject(mem,bmp);
+ BOOL ok=BitBlt(mem,0,0,w,hgt,src,0,0,SRCCOPY);
+ SelectObject(mem,old);DeleteDC(mem);ReleaseDC(liveTarget,src);
+ if(ok)analyzeBitmap(h,bmp,true);else{DeleteObject(bmp);analysis=L"Window capture unavailable (possibly protected).";}
 }
 
 bool listening=false, active=false, held=false;
@@ -102,8 +119,9 @@ LRESULT CALLBACK proc(HWND h,UINT msg,WPARAM w,LPARAM l){
  colorBox=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|CBS_DROPDOWNLIST,370,82,290,130,h,(HMENU)4,nullptr,nullptr);
  SendMessageW(colorBox,CB_ADDSTRING,0,(LPARAM)L"Purple target");SendMessageW(colorBox,CB_ADDSTRING,0,(LPARAM)L"Yellow target");SendMessageW(colorBox,CB_ADDSTRING,0,(LPARAM)L"Red target");SendMessageW(colorBox,CB_SETCURSEL,targetColor,0);
  analyzeButton=CreateWindowW(L"BUTTON",L"Analyze BMP screenshot (offline)",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,370,126,290,30,h,(HMENU)5,nullptr,nullptr);
- refresh();SetTimer(h,1,16,nullptr);return 0;}
- case WM_COMMAND:if(LOWORD(w)==5){analyzeBmp(h);return 0;}if(LOWORD(w)==1){listening=true;SetWindowTextW(keyButton,L"Press any key or mouse button (Esc cancels)...");SetFocus(h);}if(LOWORD(w)==4 && HIWORD(w)==CBN_SELCHANGE){targetColor=(int)SendMessageW(colorBox,CB_GETCURSEL,0,0);InvalidateRect(h,nullptr,FALSE);}if(LOWORD(w)==3){cfg.toggle=SendMessageW(toggleBox,BM_GETCHECK,0,0)==BST_CHECKED;save();}return 0;
+ liveButton=CreateWindowW(L"BUTTON",L"Start live window analysis (3s)",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,370,164,290,28,h,(HMENU)6,nullptr,nullptr);
+ refresh();SetTimer(h,1,16,nullptr);SetTimer(h,2,1000,nullptr);return 0;}
+ case WM_COMMAND:if(LOWORD(w)==6){if(liveMode||armCountdown){liveMode=false;armCountdown=0;SetWindowTextW(liveButton,L"Start live window analysis (3s)");analysis=L"Live analysis stopped.";}else{armCountdown=3;analysis=L"Switch to the game window within 3 seconds.";SetWindowTextW(liveButton,L"Cancel live analysis");}InvalidateRect(h,nullptr,TRUE);return 0;}if(LOWORD(w)==5){analyzeBmp(h);return 0;}if(LOWORD(w)==1){listening=true;SetWindowTextW(keyButton,L"Press any key or mouse button (Esc cancels)...");SetFocus(h);}if(LOWORD(w)==4 && HIWORD(w)==CBN_SELCHANGE){targetColor=(int)SendMessageW(colorBox,CB_GETCURSEL,0,0);InvalidateRect(h,nullptr,FALSE);}if(LOWORD(w)==3){cfg.toggle=SendMessageW(toggleBox,BM_GETCHECK,0,0)==BST_CHECKED;save();}return 0;
  case WM_HSCROLL:if((HWND)l==slider){cfg.smooth=(int)SendMessageW(slider,TBM_GETPOS,0,0);save();}return 0;
  case WM_KEYDOWN:case WM_SYSKEYDOWN:keyInput((int)w,true);return 0;
  case WM_KEYUP:case WM_SYSKEYUP:keyInput((int)w,false);return 0;
@@ -112,7 +130,7 @@ LRESULT CALLBACK proc(HWND h,UINT msg,WPARAM w,LPARAM l){
  case WM_MBUTTONDOWN:keyInput(VK_MBUTTON,true);return 0;case WM_MBUTTONUP:keyInput(VK_MBUTTON,false);return 0;
  case WM_LBUTTONDOWN:if(listening){setKey(VK_LBUTTON);}else if(GET_Y_LPARAM(l)>210){aim={GET_X_LPARAM(l),GET_Y_LPARAM(l)};}return 0;
  case WM_RBUTTONDOWN:keyInput(VK_RBUTTON,true);return 0;case WM_RBUTTONUP:keyInput(VK_RBUTTON,false);return 0;
- case WM_TIMER:{phase+=.018f;targetX=420+190*std::sin(phase);targetY=355+70*std::sin(phase*.61f);if(active){double alpha=0.004+0.26*cfg.smooth/100.0;aim.x+=(LONG)std::round((targetX-aim.x)*alpha);aim.y+=(LONG)std::round((targetY-aim.y)*alpha);}InvalidateRect(h,nullptr,FALSE);return 0;}
+ case WM_TIMER:if(w==2){if(armCountdown>0){--armCountdown;if(armCountdown==0){HWND fg=GetForegroundWindow();if(fg && fg!=h && GetWindow(fg,GW_OWNER)!=h){liveTarget=fg;liveMode=true;analysis=L"Live window selected.";}else analysis=L"No other window selected. Retry and switch to game.";}}else if(liveMode)captureLive(h);InvalidateRect(h,nullptr,FALSE);return 0;}if(w!=1)return 0;{phase+=.018f;targetX=420+190*std::sin(phase);targetY=355+70*std::sin(phase*.61f);if(active){double alpha=0.004+0.26*cfg.smooth/100.0;aim.x+=(LONG)std::round((targetX-aim.x)*alpha);aim.y+=(LONG)std::round((targetY-aim.y)*alpha);}InvalidateRect(h,nullptr,FALSE);return 0;}
  case WM_PAINT:{PAINTSTRUCT ps;HDC dc=BeginPaint(h,&ps);RECT r;GetClientRect(h,&r);RECT arena{10,245,r.right-10,r.bottom-12};HBRUSH bg=CreateSolidBrush(RGB(24,31,44));FillRect(dc,&arena,bg);DeleteObject(bg);SetBkMode(dc,TRANSPARENT);SetTextColor(dc,RGB(220,228,239));TextOutW(dc,20,253,L"IMAGE ANALYSIS / SIMULATION",27);TextOutW(dc,20,208,analysis.c_str(),(int)analysis.size());
  if(previewBitmap && previewWidth>0 && previewHeight>0){
  int aw=arena.right-arena.left-20,ah=arena.bottom-arena.top-40;
