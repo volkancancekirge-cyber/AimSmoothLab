@@ -43,6 +43,40 @@ void analyzeBmp(HWND h){
  if(total>=8 && last-start>=3)regions.push_back({start,top,last,bottom,total});
  start=-1;last=-1;total=0;top=info.bmHeight;bottom=0;
  }}
+ // Split broad clusters at pronounced low-density valleys between purple silhouettes.
+ std::vector<Region> refined;
+ for(const auto& region:regions){
+  int width=region.right-region.left+1;
+  if(width<65){refined.push_back(region);continue;}
+  std::vector<double> density(width,0.0);
+  for(int i=0;i<width;i++){
+   int sum=0,n=0;
+   for(int j=std::max(0,i-4);j<=std::min(width-1,i+4);j++){sum+=colCount[region.left+j];++n;}
+   density[i]=(double)sum/n;
+  }
+  std::vector<int> peaks;
+  for(int i=5;i<width-5;i++){
+   if(density[i]<2.0)continue;
+   bool peak=true;
+   for(int j=std::max(0,i-12);j<=std::min(width-1,i+12);j++)if(density[j]>density[i]+0.01){peak=false;break;}
+   if(peak && (peaks.empty() || i-peaks.back()>=35))peaks.push_back(i);
+  }
+  std::vector<int> cuts;
+  for(size_t p=1;p<peaks.size();p++){
+   int a=peaks[p-1],b=peaks[p];if(b-a<35)continue;
+   int valley=a;for(int j=a+1;j<b;j++)if(density[j]<density[valley])valley=j;
+   if(density[valley]<0.55*std::min(density[a],density[b]) && valley>=20 && width-valley>=20)cuts.push_back(region.left+valley);
+  }
+  int left=region.left;
+  for(size_t k=0;k<=cuts.size();k++){
+   int right=k<cuts.size()?cuts[k]:region.right;
+   int count=0,top=info.bmHeight,bottom=0;
+   for(int x=left;x<=right;x++){count+=colCount[x];if(colCount[x]){top=std::min(top,colTop[x]);bottom=std::max(bottom,colBottom[x]);}}
+   if(count>=8 && right-left>=3)refined.push_back({left,top,right,bottom,count});
+   left=right+1;
+  }
+ }
+ regions.swap(refined);
  if(detectedPixels)analysis=L"Purple pixels: "+std::to_wstring(detectedPixels)+L" | Separate regions: "+std::to_wstring(regions.size())+L" (offline preview below)";
  else analysis=L"No purple pixels found in BMP.";
  InvalidateRect(h,nullptr,TRUE);
