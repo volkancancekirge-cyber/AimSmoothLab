@@ -24,7 +24,7 @@ void analyzeBmp(HWND h){
  if(!bmp){analysis=L"Could not open BMP.";InvalidateRect(h,nullptr,TRUE);return;}
  BITMAP info{};GetObjectW(bmp,sizeof(info),&info);HDC dc=CreateCompatibleDC(nullptr);HGDIOBJ previous=SelectObject(dc,bmp);
  detectedPixels=0;boxLeft=info.bmWidth;boxTop=info.bmHeight;boxRight=0;boxBottom=0;
- int step=std::max(1,std::max(info.bmWidth,info.bmHeight)/900);
+ int step=std::max(1,std::max<int>((int)info.bmWidth,(int)info.bmHeight)/900);
  for(int y=0;y<info.bmHeight;y+=step)for(int x=0;x<info.bmWidth;x+=step){COLORREF c=GetPixel(dc,x,y);int r=GetRValue(c),g=GetGValue(c),b=GetBValue(c);
  if(r>=85 && b>=105 && b>g*1.30 && r>g*1.18 && b>r*.85){++detectedPixels;boxLeft=std::min(boxLeft,x);boxTop=std::min(boxTop,y);boxRight=std::max(boxRight,x);boxBottom=std::max(boxBottom,y);}}
  SelectObject(dc,previous);DeleteDC(dc);DeleteObject(bmp);
