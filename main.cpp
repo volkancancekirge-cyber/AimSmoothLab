@@ -10,7 +10,8 @@
 #include <chrono>
 
 struct Config { int key=VK_XBUTTON1; int smooth=35; bool toggle=false; } cfg;
-HWND windowHandle=nullptr, keyButton=nullptr, slider=nullptr, toggleBox=nullptr, colorBox=nullptr;\nint targetColor=0;
+HWND windowHandle=nullptr, keyButton=nullptr, slider=nullptr, toggleBox=nullptr, colorBox=nullptr;
+int targetColor=0;
 bool listening=false, active=false, held=false;
 POINT aim{420,300};
 float targetX=420.f,targetY=220.f, phase=0.f;
@@ -28,7 +29,9 @@ LRESULT CALLBACK proc(HWND h,UINT msg,WPARAM w,LPARAM l){
  slider=CreateWindowW(TRACKBAR_CLASSW,L"",WS_CHILD|WS_VISIBLE|TBS_AUTOTICKS,20,82,325,38,h,(HMENU)2,nullptr,nullptr);SendMessageW(slider,TBM_SETRANGE,TRUE,MAKELPARAM(1,100));
  toggleBox=CreateWindowW(L"BUTTON",L"Toggle mode (instead of hold)",WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX,20,126,330,26,h,(HMENU)3,nullptr,nullptr);
  CreateWindowW(L"STATIC",L"Click the arena to move the crosshair. Hold the selected key to smoothly follow the bot's head. No game input is sent.",WS_CHILD|WS_VISIBLE|SS_LEFT,20,160,650,38,h,nullptr,nullptr,nullptr);
- colorBox=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|CBS_DROPDOWNLIST,370,82,290,130,h,(HMENU)4,nullptr,nullptr);\n SendMessageW(colorBox,CB_ADDSTRING,0,(LPARAM)L"Purple target");SendMessageW(colorBox,CB_ADDSTRING,0,(LPARAM)L"Yellow target");SendMessageW(colorBox,CB_ADDSTRING,0,(LPARAM)L"Red target");SendMessageW(colorBox,CB_SETCURSEL,targetColor,0);\n refresh();SetTimer(h,1,16,nullptr);return 0;}
+ colorBox=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|CBS_DROPDOWNLIST,370,82,290,130,h,(HMENU)4,nullptr,nullptr);
+ SendMessageW(colorBox,CB_ADDSTRING,0,(LPARAM)L"Purple target");SendMessageW(colorBox,CB_ADDSTRING,0,(LPARAM)L"Yellow target");SendMessageW(colorBox,CB_ADDSTRING,0,(LPARAM)L"Red target");SendMessageW(colorBox,CB_SETCURSEL,targetColor,0);
+ refresh();SetTimer(h,1,16,nullptr);return 0;}
  case WM_COMMAND:if(LOWORD(w)==1){listening=true;SetWindowTextW(keyButton,L"Press any key or mouse button (Esc cancels)...");SetFocus(h);}if(LOWORD(w)==4 && HIWORD(w)==CBN_SELCHANGE){targetColor=(int)SendMessageW(colorBox,CB_GETCURSEL,0,0);InvalidateRect(h,nullptr,FALSE);}if(LOWORD(w)==3){cfg.toggle=SendMessageW(toggleBox,BM_GETCHECK,0,0)==BST_CHECKED;save();}return 0;
  case WM_HSCROLL:if((HWND)l==slider){cfg.smooth=(int)SendMessageW(slider,TBM_GETPOS,0,0);save();}return 0;
  case WM_KEYDOWN:case WM_SYSKEYDOWN:keyInput((int)w,true);return 0;
