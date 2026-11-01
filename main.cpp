@@ -76,7 +76,7 @@ void analyzeBitmap(HWND h,HBITMAP bmp,bool live){
  }
  regions.swap(refined);
  if(detectedPixels)analysis=L"Purple pixels: "+std::to_wstring(detectedPixels)+L" | Separate regions: "+std::to_wstring(regions.size())+(live?L" (LIVE preview)":L" (offline preview)");
- else analysis=L"No purple pixels found in BMP.";
+ else analysis=(live?L"No purple pixels found in live frame.":L"No purple pixels found in BMP.");
  InvalidateRect(h,nullptr,TRUE);
 }
 
@@ -88,15 +88,25 @@ void analyzeBmp(HWND h){
 }
 void captureLive(HWND h){
  if(!liveTarget || !IsWindow(liveTarget) || IsIconic(liveTarget)){liveMode=false;analysis=L"Window unavailable or minimized.";return;}
- RECT r{};GetClientRect(liveTarget,&r);int w=r.right,hgt=r.bottom;
+ // Only capture while the selected window is foreground, so the app itself cannot obscure it.
+ HWND foreground=GetForegroundWindow();
+ if(foreground!=liveTarget && GetAncestor(foreground,GA_ROOT)!=liveTarget){
+  analysis=L"Paused: switch to selected game window to capture. Last frame remains visible.";
+  InvalidateRect(h,nullptr,FALSE);return;
+ }
+ RECT r{};GetClientRect(liveTarget,&r);
+ POINT origin{0,0};ClientToScreen(liveTarget,&origin);
+ int w=r.right-r.left,hgt=r.bottom-r.top;
  if(w<20 || hgt<20 || w>6000 || hgt>4000){analysis=L"Invalid capture dimensions.";return;}
- HDC src=GetDC(liveTarget);if(!src){analysis=L"Cannot access target window.";return;}
+ // Capture visible desktop pixels at the client area's screen coordinates.
+ // No hooks, protected process access, or input injection.
+ HDC src=GetDC(nullptr);if(!src){analysis=L"Desktop capture unavailable.";return;}
  HDC mem=CreateCompatibleDC(src);HBITMAP bmp=CreateCompatibleBitmap(src,w,hgt);
- if(!mem||!bmp){if(bmp)DeleteObject(bmp);if(mem)DeleteDC(mem);ReleaseDC(liveTarget,src);analysis=L"Capture allocation failed.";return;}
+ if(!mem||!bmp){if(bmp)DeleteObject(bmp);if(mem)DeleteDC(mem);ReleaseDC(nullptr,src);analysis=L"Capture allocation failed.";return;}
  HGDIOBJ old=SelectObject(mem,bmp);
- BOOL ok=BitBlt(mem,0,0,w,hgt,src,0,0,SRCCOPY);
- SelectObject(mem,old);DeleteDC(mem);ReleaseDC(liveTarget,src);
- if(ok)analyzeBitmap(h,bmp,true);else{DeleteObject(bmp);analysis=L"Window capture unavailable (possibly protected).";}
+ BOOL ok=BitBlt(mem,0,0,w,hgt,src,origin.x,origin.y,SRCCOPY|CAPTUREBLT);
+ SelectObject(mem,old);DeleteDC(mem);ReleaseDC(nullptr,src);
+ if(ok)analyzeBitmap(h,bmp,true);else{DeleteObject(bmp);analysis=L"Desktop capture failed or protected.";InvalidateRect(h,nullptr,FALSE);}
 }
 
 bool listening=false, active=false, held=false;
