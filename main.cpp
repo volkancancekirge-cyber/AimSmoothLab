@@ -17,12 +17,14 @@ HWND windowHandle=nullptr, keyButton=nullptr, slider=nullptr, toggleBox=nullptr,
 int targetColor=0;
 HWND analyzeButton=nullptr,liveButton=nullptr,liveTarget=nullptr;
 bool liveMode=false;int armCountdown=0;
+double processingMs=0.0;int captureFrames=0;DWORD lastCaptureTick=0;double captureFps=0.0;bool capturePaused=false;
 std::wstring analysis=L"No screenshot loaded. BMP screenshots only.";
 int detectedPixels=0, boxLeft=0,boxTop=0,boxRight=0,boxBottom=0;
 struct Region {int left,top,right,bottom,count;};
 std::vector<Region> regions;
 HBITMAP previewBitmap=nullptr;int previewWidth=0,previewHeight=0;
 void analyzeBitmap(HWND h,HBITMAP bmp,bool live){
+ auto processingStart=std::chrono::steady_clock::now();
  if(!bmp){analysis=L"Capture failed or unavailable.";InvalidateRect(h,nullptr,TRUE);return;}
  if(previewBitmap)DeleteObject(previewBitmap);previewBitmap=bmp;
  BITMAP info{};GetObjectW(bmp,sizeof(info),&info);previewWidth=info.bmWidth;previewHeight=info.bmHeight;
@@ -75,6 +77,7 @@ void analyzeBitmap(HWND h,HBITMAP bmp,bool live){
   }
  }
  regions.swap(refined);
+ processingMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-processingStart).count();
  if(detectedPixels)analysis=L"Purple pixels: "+std::to_wstring(detectedPixels)+L" | Separate regions: "+std::to_wstring(regions.size())+(live?L" (LIVE preview)":L" (offline preview)");
  else analysis=(live?L"No purple pixels found in live frame.":L"No purple pixels found in BMP.");
  InvalidateRect(h,nullptr,TRUE);
@@ -91,7 +94,7 @@ void captureLive(HWND h){
  // Only capture while the selected window is foreground, so the app itself cannot obscure it.
  HWND foreground=GetForegroundWindow();
  if(foreground!=liveTarget && GetAncestor(foreground,GA_ROOT)!=liveTarget){
-  analysis=L"Paused: switch to selected game window to capture. Last frame remains visible.";
+  capturePaused=true;analysis=L"Paused: return to game to resume capture.";
   InvalidateRect(h,nullptr,FALSE);return;
  }
  RECT r{};GetClientRect(liveTarget,&r);
@@ -106,7 +109,7 @@ void captureLive(HWND h){
  HGDIOBJ old=SelectObject(mem,bmp);
  BOOL ok=BitBlt(mem,0,0,w,hgt,src,origin.x,origin.y,SRCCOPY|CAPTUREBLT);
  SelectObject(mem,old);DeleteDC(mem);ReleaseDC(nullptr,src);
- if(ok)analyzeBitmap(h,bmp,true);else{DeleteObject(bmp);analysis=L"Desktop capture failed or protected.";InvalidateRect(h,nullptr,FALSE);}
+ if(ok){capturePaused=false;DWORD now=GetTickCount();if(lastCaptureTick){DWORD elapsed=now-lastCaptureTick;if(elapsed)captureFps=1000.0/elapsed;}lastCaptureTick=now;++captureFrames;analyzeBitmap(h,bmp,true);}else{DeleteObject(bmp);analysis=L"Desktop capture failed or protected.";InvalidateRect(h,nullptr,FALSE);}
 }
 
 bool listening=false, active=false, held=false;
@@ -125,7 +128,7 @@ LRESULT CALLBACK proc(HWND h,UINT msg,WPARAM w,LPARAM l){
  CreateWindowW(L"STATIC",L"Smooth (1 slow - 100 fast)",WS_CHILD|WS_VISIBLE,20,58,320,22,h,nullptr,nullptr,nullptr);
  slider=CreateWindowW(TRACKBAR_CLASSW,L"",WS_CHILD|WS_VISIBLE|TBS_AUTOTICKS,20,82,325,38,h,(HMENU)2,nullptr,nullptr);SendMessageW(slider,TBM_SETRANGE,TRUE,MAKELPARAM(1,100));
  toggleBox=CreateWindowW(L"BUTTON",L"Toggle mode (instead of hold)",WS_CHILD|WS_VISIBLE|BS_AUTOCHECKBOX,20,126,330,26,h,(HMENU)3,nullptr,nullptr);
- CreateWindowW(L"STATIC",L"Load a saved BMP screenshot to analyze purple pixels offline. No screen capture, game access or mouse input.",WS_CHILD|WS_VISIBLE|SS_LEFT,20,160,650,38,h,nullptr,nullptr,nullptr);
+ CreateWindowW(L"STATIC",L"Offline BMP or live window analysis. Read-only: no game input or mouse control.",WS_CHILD|WS_VISIBLE|SS_LEFT,20,202,650,24,h,nullptr,nullptr,nullptr);
  colorBox=CreateWindowW(L"COMBOBOX",L"",WS_CHILD|WS_VISIBLE|CBS_DROPDOWNLIST,370,82,290,130,h,(HMENU)4,nullptr,nullptr);
  SendMessageW(colorBox,CB_ADDSTRING,0,(LPARAM)L"Purple target");SendMessageW(colorBox,CB_ADDSTRING,0,(LPARAM)L"Yellow target");SendMessageW(colorBox,CB_ADDSTRING,0,(LPARAM)L"Red target");SendMessageW(colorBox,CB_SETCURSEL,targetColor,0);
  analyzeButton=CreateWindowW(L"BUTTON",L"Analyze BMP screenshot (offline)",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,370,126,290,30,h,(HMENU)5,nullptr,nullptr);
@@ -140,8 +143,16 @@ LRESULT CALLBACK proc(HWND h,UINT msg,WPARAM w,LPARAM l){
  case WM_MBUTTONDOWN:keyInput(VK_MBUTTON,true);return 0;case WM_MBUTTONUP:keyInput(VK_MBUTTON,false);return 0;
  case WM_LBUTTONDOWN:if(listening){setKey(VK_LBUTTON);}else if(GET_Y_LPARAM(l)>210){aim={GET_X_LPARAM(l),GET_Y_LPARAM(l)};}return 0;
  case WM_RBUTTONDOWN:keyInput(VK_RBUTTON,true);return 0;case WM_RBUTTONUP:keyInput(VK_RBUTTON,false);return 0;
- case WM_TIMER:if(w==2){if(armCountdown>0){--armCountdown;if(armCountdown==0){HWND fg=GetForegroundWindow();if(fg && fg!=h && GetWindow(fg,GW_OWNER)!=h){liveTarget=fg;liveMode=true;analysis=L"Live window selected.";}else analysis=L"No other window selected. Retry and switch to game.";}}else if(liveMode)captureLive(h);InvalidateRect(h,nullptr,FALSE);return 0;}if(w!=1)return 0;{phase+=.018f;targetX=420+190*std::sin(phase);targetY=355+70*std::sin(phase*.61f);if(active){double alpha=0.004+0.26*cfg.smooth/100.0;aim.x+=(LONG)std::round((targetX-aim.x)*alpha);aim.y+=(LONG)std::round((targetY-aim.y)*alpha);}InvalidateRect(h,nullptr,FALSE);return 0;}
- case WM_PAINT:{PAINTSTRUCT ps;HDC dc=BeginPaint(h,&ps);RECT r;GetClientRect(h,&r);RECT arena{10,245,r.right-10,r.bottom-12};HBRUSH bg=CreateSolidBrush(RGB(24,31,44));FillRect(dc,&arena,bg);DeleteObject(bg);SetBkMode(dc,TRANSPARENT);SetTextColor(dc,RGB(220,228,239));TextOutW(dc,20,253,L"IMAGE ANALYSIS / SIMULATION",27);TextOutW(dc,20,208,analysis.c_str(),(int)analysis.size());
+ case WM_TIMER:if(w==2){if(armCountdown>0){--armCountdown;if(armCountdown==0){HWND fg=GetForegroundWindow();if(fg && fg!=h && GetWindow(fg,GW_OWNER)!=h){liveTarget=fg;liveMode=true;capturePaused=false;lastCaptureTick=0;captureFps=0;analysis=L"Live window selected.";}else analysis=L"No other window selected. Retry and switch to game.";}}else if(liveMode)captureLive(h);InvalidateRect(h,nullptr,FALSE);return 0;}if(w!=1)return 0;{phase+=.018f;targetX=420+190*std::sin(phase);targetY=355+70*std::sin(phase*.61f);if(active){double alpha=0.004+0.26*cfg.smooth/100.0;aim.x+=(LONG)std::round((targetX-aim.x)*alpha);aim.y+=(LONG)std::round((targetY-aim.y)*alpha);}InvalidateRect(h,nullptr,FALSE);return 0;}
+ case WM_PAINT:{PAINTSTRUCT ps;HDC dc=BeginPaint(h,&ps);RECT r;GetClientRect(h,&r);RECT arena{10,304,r.right-10,r.bottom-12};HBRUSH bg=CreateSolidBrush(RGB(24,31,44));FillRect(dc,&arena,bg);DeleteObject(bg);SetBkMode(dc,TRANSPARENT);SetTextColor(dc,RGB(220,228,239));TextOutW(dc,20,313,L"IMAGE ANALYSIS / SIMULATION",27);
+ SetTextColor(dc,RGB(35,49,70));
+ std::wstring statusLine=liveMode?(capturePaused?L"PAUSED - focus game to resume":L"LIVE - monitoring selected window"):(armCountdown?L"SELECT WINDOW - switch to game":L"OFFLINE / IDLE");
+ std::wstring performance=L"Mode: "+statusLine+L" | Regions: "+std::to_wstring(regions.size())+L" | Purple: "+std::to_wstring(detectedPixels);
+ TextOutW(dc,20,235,performance.c_str(),(int)performance.size());
+ std::wstring timings=L"Processing: "+std::to_wstring((int)processingMs)+L" ms | Capture rate: "+std::to_wstring((int)(captureFps+0.5))+L" FPS (1-second sampling)";
+ TextOutW(dc,20,256,timings.c_str(),(int)timings.size());
+ TextOutW(dc,20,278,analysis.c_str(),(int)analysis.size());
+ SetTextColor(dc,RGB(220,228,239));
  if(previewBitmap && previewWidth>0 && previewHeight>0){
  int aw=arena.right-arena.left-20,ah=arena.bottom-arena.top-40;
  double scale=std::min((double)aw/previewWidth,(double)ah/previewHeight);
@@ -159,4 +170,4 @@ LRESULT CALLBACK proc(HWND h,UINT msg,WPARAM w,LPARAM l){
  case WM_DESTROY:if(previewBitmap)DeleteObject(previewBitmap);save();PostQuitMessage(0);return 0;
  }return DefWindowProcW(h,msg,w,l);
 }
-int WINAPI wWinMain(HINSTANCE inst,HINSTANCE,LPWSTR,int show){WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=inst;wc.lpszClassName=L"AimSmoothLabWindow";wc.hCursor=LoadCursor(nullptr,IDC_ARROW);wc.hbrBackground=(HBRUSH)(COLOR_BTNFACE+1);RegisterClassW(&wc);windowHandle=CreateWindowW(wc.lpszClassName,L"AimSmoothLab - Offline Aim Smoothing Simulator",WS_OVERLAPPEDWINDOW|WS_VISIBLE,100,100,720,680,nullptr,nullptr,inst,nullptr);ShowWindow(windowHandle,show);MSG msg;while(GetMessageW(&msg,nullptr,0,0)){TranslateMessage(&msg);DispatchMessageW(&msg);}return 0;}
+int WINAPI wWinMain(HINSTANCE inst,HINSTANCE,LPWSTR,int show){WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=inst;wc.lpszClassName=L"AimSmoothLabWindow";wc.hCursor=LoadCursor(nullptr,IDC_ARROW);wc.hbrBackground=(HBRUSH)(COLOR_BTNFACE+1);RegisterClassW(&wc);windowHandle=CreateWindowW(wc.lpszClassName,L"AimSmoothLab - Live Visual Analysis (read-only)",WS_OVERLAPPEDWINDOW|WS_VISIBLE,100,100,720,680,nullptr,nullptr,inst,nullptr);ShowWindow(windowHandle,show);MSG msg;while(GetMessageW(&msg,nullptr,0,0)){TranslateMessage(&msg);DispatchMessageW(&msg);}return 0;}
