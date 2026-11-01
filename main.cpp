@@ -144,14 +144,14 @@ LRESULT CALLBACK proc(HWND h,UINT msg,WPARAM w,LPARAM l){
  case WM_LBUTTONDOWN:if(listening){setKey(VK_LBUTTON);}else if(GET_Y_LPARAM(l)>210){aim={GET_X_LPARAM(l),GET_Y_LPARAM(l)};}return 0;
  case WM_RBUTTONDOWN:keyInput(VK_RBUTTON,true);return 0;case WM_RBUTTONUP:keyInput(VK_RBUTTON,false);return 0;
  case WM_TIMER:if(w==2){if(armCountdown>0){--armCountdown;if(armCountdown==0){HWND fg=GetForegroundWindow();if(fg && fg!=h && GetWindow(fg,GW_OWNER)!=h){liveTarget=fg;liveMode=true;capturePaused=false;lastCaptureTick=0;captureFps=0;analysis=L"Live window selected.";}else analysis=L"No other window selected. Retry and switch to game.";}}else if(liveMode)captureLive(h);InvalidateRect(h,nullptr,FALSE);return 0;}if(w!=1)return 0;{phase+=.018f;targetX=420+190*std::sin(phase);targetY=355+70*std::sin(phase*.61f);if(active){double alpha=0.004+0.26*cfg.smooth/100.0;aim.x+=(LONG)std::round((targetX-aim.x)*alpha);aim.y+=(LONG)std::round((targetY-aim.y)*alpha);}InvalidateRect(h,nullptr,FALSE);return 0;}
- case WM_PAINT:{PAINTSTRUCT ps;HDC dc=BeginPaint(h,&ps);RECT r;GetClientRect(h,&r);RECT arena{10,304,r.right-10,r.bottom-12};HBRUSH bg=CreateSolidBrush(RGB(24,31,44));FillRect(dc,&arena,bg);DeleteObject(bg);SetBkMode(dc,TRANSPARENT);SetTextColor(dc,RGB(220,228,239));TextOutW(dc,20,313,L"IMAGE ANALYSIS / SIMULATION",27);
- SetTextColor(dc,RGB(35,49,70));
+ case WM_PAINT:{PAINTSTRUCT ps;HDC dc=BeginPaint(h,&ps);RECT r;GetClientRect(h,&r);FillRect(dc,&r,(HBRUSH)(COLOR_BTNFACE+1));RECT arena{10,332,r.right-10,r.bottom-12};HBRUSH bg=CreateSolidBrush(RGB(24,31,44));FillRect(dc,&arena,bg);DeleteObject(bg);SetBkMode(dc,TRANSPARENT);SetTextColor(dc,RGB(220,228,239));TextOutW(dc,20,341,L"IMAGE ANALYSIS / SIMULATION",27);
+ SetTextColor(dc,RGB(25,45,65));
  std::wstring statusLine=liveMode?(capturePaused?L"PAUSED - focus game to resume":L"LIVE - monitoring selected window"):(armCountdown?L"SELECT WINDOW - switch to game":L"OFFLINE / IDLE");
  std::wstring performance=L"Mode: "+statusLine+L" | Regions: "+std::to_wstring(regions.size())+L" | Purple: "+std::to_wstring(detectedPixels);
- TextOutW(dc,20,235,performance.c_str(),(int)performance.size());
+ RECT statusRect{20,255,r.right-20,277};DrawTextW(dc,performance.c_str(),-1,&statusRect,DT_LEFT|DT_SINGLELINE|DT_END_ELLIPSIS);
  std::wstring timings=L"Processing: "+std::to_wstring((int)processingMs)+L" ms | Capture rate: "+std::to_wstring((int)(captureFps+0.5))+L" FPS (1-second sampling)";
- TextOutW(dc,20,256,timings.c_str(),(int)timings.size());
- TextOutW(dc,20,278,analysis.c_str(),(int)analysis.size());
+ RECT timingRect{20,280,r.right-20,301};DrawTextW(dc,timings.c_str(),-1,&timingRect,DT_LEFT|DT_SINGLELINE|DT_END_ELLIPSIS);
+ RECT detailRect{20,305,r.right-20,326};DrawTextW(dc,analysis.c_str(),-1,&detailRect,DT_LEFT|DT_SINGLELINE|DT_END_ELLIPSIS);
  SetTextColor(dc,RGB(220,228,239));
  if(previewBitmap && previewWidth>0 && previewHeight>0){
  int aw=arena.right-arena.left-20,ah=arena.bottom-arena.top-40;
