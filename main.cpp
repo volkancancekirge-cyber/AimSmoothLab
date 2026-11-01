@@ -28,12 +28,15 @@ void analyzeBitmap(HWND h,HBITMAP bmp,bool live){
  if(!bmp){analysis=L"Capture failed or unavailable.";InvalidateRect(h,nullptr,TRUE);return;}
  if(previewBitmap)DeleteObject(previewBitmap);previewBitmap=bmp;
  BITMAP info{};GetObjectW(bmp,sizeof(info),&info);previewWidth=info.bmWidth;previewHeight=info.bmHeight;
- std::vector<int> colCount(info.bmWidth,0),colTop(info.bmWidth,info.bmHeight),colBottom(info.bmWidth,0);regions.clear();HDC dc=CreateCompatibleDC(nullptr);HGDIOBJ previous=SelectObject(dc,bmp);
+ std::vector<int> colCount(info.bmWidth,0),colTop(info.bmWidth,info.bmHeight),colBottom(info.bmWidth,0);regions.clear();
+ BITMAPINFO bi{};bi.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);bi.bmiHeader.biWidth=info.bmWidth;bi.bmiHeader.biHeight=-info.bmHeight;bi.bmiHeader.biPlanes=1;bi.bmiHeader.biBitCount=32;bi.bmiHeader.biCompression=BI_RGB;
+ std::vector<unsigned char> pixels((size_t)info.bmWidth*(size_t)info.bmHeight*4);
+ HDC dc=GetDC(nullptr);int copied=GetDIBits(dc,bmp,0,(UINT)info.bmHeight,pixels.data(),&bi,DIB_RGB_COLORS);ReleaseDC(nullptr,dc);
+ if(!copied){analysis=L"Could not read bitmap pixels.";InvalidateRect(h,nullptr,FALSE);return;}
  detectedPixels=0;boxLeft=info.bmWidth;boxTop=info.bmHeight;boxRight=0;boxBottom=0;
  int step=std::max(1,std::max<int>((int)info.bmWidth,(int)info.bmHeight)/900);
- for(int y=0;y<info.bmHeight;y+=step)for(int x=0;x<info.bmWidth;x+=step){COLORREF c=GetPixel(dc,x,y);int r=GetRValue(c),g=GetGValue(c),b=GetBValue(c);
+ for(int y=0;y<info.bmHeight;y+=step)for(int x=0;x<info.bmWidth;x+=step){size_t idx=((size_t)y*(size_t)info.bmWidth+(size_t)x)*4;int b=pixels[idx],g=pixels[idx+1],r=pixels[idx+2];
  if(r>=85 && b>=105 && b>g*1.30 && r>g*1.18 && b>r*.85){++detectedPixels;++colCount[x];colTop[x]=std::min(colTop[x],y);colBottom[x]=std::max(colBottom[x],y);boxLeft=std::min(boxLeft,x);boxTop=std::min(boxTop,y);boxRight=std::max(boxRight,x);boxBottom=std::max(boxBottom,y);}}
- SelectObject(dc,previous);DeleteDC(dc);
  // Group purple pixels into separate horizontal clusters, allowing small gaps.
  int start=-1,last=-1,total=0,top=info.bmHeight,bottom=0;
  for(int x=0;x<=info.bmWidth+12;x++){
